@@ -31,13 +31,17 @@ class ProductPrice:
     pack_info: str = ""
 
     @classmethod
-    def from_row(cls, row: dict) -> ProductPrice:
+    def from_row(cls, row) -> ProductPrice:
+        try:
+            pack_info = row["pack_info"]
+        except (IndexError, KeyError):
+            pack_info = ""
         return cls(
             product_id=row["product_id"],
             price=row["price"],
             in_stock=bool(row["in_stock"]),
             last_checked=row["last_checked"],
-            pack_info=row.get("pack_info", ""),
+            pack_info=pack_info or "",
         )
 
 
