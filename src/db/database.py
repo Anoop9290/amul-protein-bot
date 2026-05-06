@@ -40,6 +40,16 @@ CREATE TABLE IF NOT EXISTS schedules (
     FOREIGN KEY (user_id) REFERENCES users(telegram_id)
 );
 
+CREATE TABLE IF NOT EXISTS watchlist (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL,
+    product_id    TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    notified      INTEGER DEFAULT 0,
+    UNIQUE(user_id, product_id),
+    FOREIGN KEY (user_id) REFERENCES users(telegram_id)
+);
+
 CREATE TABLE IF NOT EXISTS orders (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id         INTEGER NOT NULL,
@@ -286,3 +296,64 @@ class Database:
             )
             row = await cursor.fetchone()
             return Order.from_row(row) if row else None
+
+    # ── Watchlist ──
+
+    async def add_to_watchlist(self, user_id: int, product_id: str) -> bool:
+        """Add a product to the user's watchlist. Returns True if added, False if already exists."""
+        async with aiosqlite.connect(self._path) as db:
+            try:
+                await db.execute(
+                    """INSERT INTO watchlist (user_id, product_id, created_at, notified)
+                       VALUES (?, ?, ?, 0)""",
+                    (user_id, product_id, _now()),
+                )
+                await db.commit()
+                return True
+            except Exception:
+                return False
+
+    async def remove_from_watchlist(self, user_id: int, product_id: str) -> None:
+        async with aiosqlite.connect(self._path) as db:
+            await db.execute(
+                "DELETE FROM watchlist WHERE user_id = ? AND product_id = ?",
+                (user_id, product_id),
+            )
+            await db.commit()
+
+    async def get_user_watchlist(self, user_id: int) -> list[str]:
+        """Return list of product_ids the user is watching."""
+        async with aiosqlite.connect(self._path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT product_id FROM watchlist WHERE user_id = ? AND notified = 0",
+                (user_id,),
+            )
+            rows = await cursor.fetchall()
+            return [row["product_id"] for row in rows]
+
+    async def get_watchers_for_product(self, product_id: str) -> list[int]:
+        """Return user_ids watching a specific product (not yet notified)."""
+        async with aiosqlite.connect(self._path) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT user_id FROM watchlist WHERE product_id = ? AND notified = 0",
+                (product_id,),
+            )
+            rows = await cursor.fetchall()
+            return [row["user_id"] for row in rows]
+
+    async def mark_watchlist_notified(self, user_id: int, product_id: str) -> None:
+        async with aiosqlite.connect(self._path) as db:
+            await db.execute(
+                "UPDATE watchlist SET notified = 1 WHERE user_id = ? AND product_id = ?",
+                (user_id, product_id),
+            )
+            await db.commit()
+
+    async def clear_user_watchlist(self, user_id: int) -> None:
+        async with aiosqlite.connect(self._path) as db:
+            await db.execute(
+                "DELETE FROM watchlist WHERE user_id = ?", (user_id,)
+            )
+            await db.commit()

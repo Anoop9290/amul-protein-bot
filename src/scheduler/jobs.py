@@ -59,6 +59,31 @@ async def price_check_job(app: Application) -> None:
             except Exception as exc:
                 logger.error("Failed to send price alert: %s", exc)
 
+    # Notify watchers when out-of-stock items come back
+    for product_id, now_in_stock in stock_changes:
+        if not now_in_stock:
+            continue
+        watchers = await db.get_watchers_for_product(product_id)
+        sp_data = next((s for s in scraped if s.product_id == product_id), None)
+        price = sp_data.price if sp_data else 0.0
+
+        for watcher_id in watchers:
+            watcher = await db.get_user(watcher_id)
+            if not watcher or not watcher.notifications_enabled:
+                continue
+            try:
+                text = messages.back_in_stock_alert(product_id, price)
+                await app.bot.send_message(
+                    chat_id=watcher_id,
+                    text=text,
+                    parse_mode=ParseMode.MARKDOWN,
+                    disable_web_page_preview=False,
+                )
+                await db.mark_watchlist_notified(watcher_id, product_id)
+                logger.info("Sent back-in-stock alert for %s to user %d", product_id, watcher_id)
+            except Exception as exc:
+                logger.error("Failed to send watchlist alert: %s", exc)
+
     logger.info(
         "Price check done: %d price changes, %d stock changes",
         len(price_changes),

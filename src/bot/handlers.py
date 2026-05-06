@@ -642,6 +642,95 @@ async def reminder_callback(
         )
 
 
+# ── Track Availability ──
+
+
+async def track_command(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    if not _is_admin(update):
+        return
+
+    db = _get_db(context)
+    user = update.effective_user
+    assert user is not None
+
+    prices_list = await db.get_all_product_prices()
+    stock_status = {pp.product_id: pp.in_stock for pp in prices_list}
+    last_checked = max((pp.last_checked for pp in prices_list), default="")
+
+    watchlist = set(await db.get_user_watchlist(user.id))
+
+    text = messages.track_dashboard_message(stock_status, watchlist, last_checked)
+    await update.message.reply_text(
+        text,
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=keyboards.track_keyboard(watchlist, stock_status),
+    )
+
+
+async def track_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+
+    db = _get_db(context)
+    user = update.effective_user
+    assert user is not None
+
+    if data.startswith("track_toggle:"):
+        pid = data.split(":", 1)[1]
+        current_watchlist = await db.get_user_watchlist(user.id)
+        if pid in current_watchlist:
+            await db.remove_from_watchlist(user.id, pid)
+        else:
+            await db.add_to_watchlist(user.id, pid)
+
+    elif data == "track_clear":
+        await db.clear_user_watchlist(user.id)
+
+    elif data == "track_refresh":
+        scraper = _get_scraper(context)
+        try:
+            await query.edit_message_text("Refreshing availability data...")
+            scraped = await scraper.scrape_all()
+            for sp in scraped:
+                await db.upsert_product_price(
+                    sp.product_id, sp.price, sp.in_stock, sp.pack_info
+                )
+        except Exception as exc:
+            logger.error("Track refresh failed: %s", exc)
+
+    elif data.startswith("track_info:"):
+        pid = data.split(":", 1)[1]
+        product = PRODUCT_CATALOG.get(pid)
+        if product:
+            pp = await db.get_product_price(pid)
+            price_str = f"Rs. {pp.price:.0f}" if pp and pp.price > 0 else "N/A"
+            stock = "In Stock" if pp and pp.in_stock else "Out of Stock"
+            checked = pp.last_checked[:16] if pp else "Never"
+            await query.answer(
+                f"{product.name}\n{price_str} | {stock}\nChecked: {checked}",
+                show_alert=True,
+            )
+            return
+
+    # Refresh dashboard after any toggle/clear/refresh
+    prices_list = await db.get_all_product_prices()
+    stock_status = {pp.product_id: pp.in_stock for pp in prices_list}
+    last_checked = max((pp.last_checked for pp in prices_list), default="")
+    watchlist = set(await db.get_user_watchlist(user.id))
+
+    text = messages.track_dashboard_message(stock_status, watchlist, last_checked)
+    await query.edit_message_text(
+        text,
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=keyboards.track_keyboard(watchlist, stock_status),
+    )
+
+
 # ── Settings ──
 
 
@@ -792,9 +881,11 @@ def get_all_handlers() -> list:
         CommandHandler("start", start_command),
         CommandHandler("help", help_command),
         CommandHandler("products", products_command),
+        CommandHandler("track", track_command),
         CommandHandler("myorders", myorders_command),
         order_conv,
         schedule_conv,
         settings_conv,
+        CallbackQueryHandler(track_callback, pattern=r"^track_"),
         CallbackQueryHandler(reminder_callback, pattern=r"^reminder:"),
     ]

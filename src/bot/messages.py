@@ -12,12 +12,13 @@ def welcome_message() -> str:
         "from shop.amul.com.\n\n"
         "*Commands:*\n"
         "/products - View products with live prices\n"
+        "/track - Availability dashboard & watchlist\n"
         "/order - Start a new order\n"
         "/schedule - Set up weekly order reminders\n"
         "/myorders - View order history\n"
         "/settings - Configure pincode & notifications\n"
         "/help - Show this help message\n\n"
-        "Get started by checking /products or placing an /order!"
+        "Get started by checking /products or /track availability!"
     )
 
 
@@ -26,13 +27,14 @@ def help_message() -> str:
         "*Amul Protein Bot - Help*\n\n"
         "/start - Welcome & setup\n"
         "/products - Show all products with prices & availability\n"
+        "/track - Availability dashboard & stock watchlist\n"
         "/order - Select products & quantities, prepare cart\n"
         "/schedule - Configure weekly order reminders\n"
         "/myorders - View your recent orders\n"
         "/settings - Set pincode, toggle notifications\n"
         "/help - This help message\n\n"
-        "_Tip: The bot prepares your cart on shop.amul.com. "
-        "You complete the payment in your browser._"
+        "_Tip: Use /track to watch out-of-stock items. "
+        "You'll get notified the moment they're back!_"
     )
 
 
@@ -244,6 +246,79 @@ def price_alert_message(
             status = "Back in Stock!" if now_in_stock else "Out of Stock"
             lines.append(f"  {name}: {status}")
 
+    return "\n".join(lines)
+
+
+def track_dashboard_message(
+    stock_status: dict[str, bool],
+    watchlist: set[str],
+    last_checked: str,
+) -> str:
+    in_count = sum(1 for v in stock_status.values() if v is True)
+    out_count = sum(1 for v in stock_status.values() if v is False)
+    unknown = len(PRODUCT_CATALOG) - in_count - out_count
+
+    lines = [
+        "*Availability Tracker*\n",
+        f"In Stock: {in_count} | Out of Stock: {out_count}"
+        + (f" | Unknown: {unknown}" if unknown else ""),
+        f"Watching: {len(watchlist)} products\n",
+    ]
+
+    # Group by category
+    rtd = []
+    kool = []
+    whey = []
+    other = []
+    for pid, product in PRODUCT_CATALOG.items():
+        status = stock_status.get(pid)
+        icon = "[OK]" if status is True else "[X]" if status is False else "[?]"
+        watch = " (watching)" if pid in watchlist else ""
+        entry = f"{icon} {product.short_name}{watch}"
+
+        if "kool" in product.tags:
+            kool.append(entry)
+        elif "whey" in product.tags:
+            whey.append(entry)
+        elif "rtd" in product.tags:
+            rtd.append(entry)
+        else:
+            other.append(entry)
+
+    if rtd:
+        lines.append("*Ready-to-Drink:*")
+        lines.extend(f"  {e}" for e in rtd)
+    if kool:
+        lines.append("*Kool Milkshakes:*")
+        lines.extend(f"  {e}" for e in kool)
+    if whey:
+        lines.append("*Whey Protein:*")
+        lines.extend(f"  {e}" for e in whey)
+    if other:
+        lines.append("*Other:*")
+        lines.extend(f"  {e}" for e in other)
+
+    if last_checked:
+        lines.append(f"\n_Last checked: {last_checked[:16]} UTC_")
+
+    lines.append("\nTap *(+) Watch* to get notified when an out-of-stock item returns.")
+    return "\n".join(lines)
+
+
+def back_in_stock_alert(product_id: str, price: float) -> str:
+    product = PRODUCT_CATALOG.get(product_id)
+    name = product.name if product else product_id
+    price_str = f"Rs. {price:.0f}" if price > 0 else ""
+    url = product.url if product else ""
+
+    lines = [
+        "*Back in Stock!*\n",
+        f"*{name}* is now available!",
+    ]
+    if price_str:
+        lines.append(f"Price: {price_str}")
+    if url:
+        lines.append(f"\n[Order Now]({url})")
     return "\n".join(lines)
 
 
