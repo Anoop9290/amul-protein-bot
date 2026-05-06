@@ -49,10 +49,13 @@ async def post_shutdown(app: Application) -> None:
 
 
 def main() -> None:
+    token_preview = TELEGRAM_BOT_TOKEN[:10] + "..." if TELEGRAM_BOT_TOKEN else "(empty)"
+    logger.info("Token check: %s", token_preview)
+
     if not TELEGRAM_BOT_TOKEN:
         logger.error(
             "TELEGRAM_BOT_TOKEN not set. "
-            "Copy .env.example to .env and fill in your bot token."
+            "Set it as an environment variable or in a .env file."
         )
         sys.exit(1)
 
