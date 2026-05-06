@@ -60,7 +60,6 @@ def product_list_message(products: list[ScrapedProduct]) -> str:
             f"  {price_str} | {stock}\n"
         )
 
-    lines.append("Use /track to watch out-of-stock items!")
     return "\n".join(lines)
 
 
@@ -86,7 +85,6 @@ def product_list_from_db(prices: list[ProductPrice]) -> str:
             f"  {price_str} | {stock}\n"
         )
 
-    lines.append("Use /track to watch out-of-stock items!")
     return "\n".join(lines)
 
 

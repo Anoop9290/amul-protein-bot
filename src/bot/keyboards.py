@@ -38,15 +38,34 @@ def track_keyboard(
             ]
         )
 
-    bottom_row = [
+    action_row = [
         InlineKeyboardButton("Refresh", callback_data="track_refresh"),
     ]
     if watchlist:
-        bottom_row.append(
+        action_row.append(
             InlineKeyboardButton("Clear All", callback_data="track_clear"),
         )
-    rows.append(bottom_row)
+    rows.append(action_row)
+    rows.append(
+        [InlineKeyboardButton("Back to Products", callback_data="track_back_products")]
+    )
     return InlineKeyboardMarkup(rows)
+
+
+def products_keyboard() -> InlineKeyboardMarkup:
+    """Button shown below the /products list to jump to tracking."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "Track Availability", callback_data="open_track"
+                ),
+                InlineKeyboardButton(
+                    "Refresh Prices", callback_data="refresh_products"
+                ),
+            ],
+        ]
+    )
 
 
 def settings_keyboard(notifications_on: bool) -> InlineKeyboardMarkup:

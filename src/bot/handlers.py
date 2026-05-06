@@ -94,7 +94,60 @@ async def products_command(
         prices = await db.get_all_product_prices()
         text = messages.product_list_from_db(prices)
 
-    await msg.edit_text(text, parse_mode=ParseMode.MARKDOWN)
+    await msg.edit_text(
+        text,
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=keyboards.products_keyboard(),
+    )
+
+
+async def products_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data or ""
+
+    if data == "open_track":
+        db = _get_db(context)
+        user = update.effective_user
+        assert user is not None
+
+        prices_list = await db.get_all_product_prices()
+        stock_status = {pp.product_id: pp.in_stock for pp in prices_list}
+        last_checked = max((pp.last_checked for pp in prices_list), default="")
+        watchlist = set(await db.get_user_watchlist(user.id))
+
+        text = messages.track_dashboard_message(stock_status, watchlist, last_checked)
+        await query.edit_message_text(
+            text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=keyboards.track_keyboard(watchlist, stock_status),
+        )
+
+    elif data == "refresh_products":
+        db = _get_db(context)
+        scraper = _get_scraper(context)
+
+        await query.edit_message_text("Refreshing product data...")
+
+        try:
+            scraped = await scraper.scrape_all()
+            for sp in scraped:
+                await db.upsert_product_price(
+                    sp.product_id, sp.price, sp.in_stock, sp.pack_info
+                )
+            text = messages.product_list_message(scraped)
+        except Exception as exc:
+            logger.error("Failed to scrape products: %s", exc)
+            prices = await db.get_all_product_prices()
+            text = messages.product_list_from_db(prices)
+
+        await query.edit_message_text(
+            text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=keyboards.products_keyboard(),
+        )
 
 
 # ── /track ──
@@ -157,6 +210,16 @@ async def track_callback(
                 )
         except Exception as exc:
             logger.error("Track refresh failed: %s", exc)
+
+    elif data == "track_back_products":
+        prices_list = await db.get_all_product_prices()
+        text = messages.product_list_from_db(prices_list)
+        await query.edit_message_text(
+            text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=keyboards.products_keyboard(),
+        )
+        return
 
     elif data.startswith("track_info:"):
         pid = data.split(":", 1)[1]
@@ -295,5 +358,6 @@ def get_all_handlers() -> list:
         CommandHandler("products", products_command),
         CommandHandler("track", track_command),
         settings_conv,
+        CallbackQueryHandler(products_callback, pattern=r"^(open_track|refresh_products)$"),
         CallbackQueryHandler(track_callback, pattern=r"^track_"),
     ]
