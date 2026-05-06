@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import sys
 
@@ -11,7 +10,6 @@ from src.bot.handlers import get_all_handlers
 from src.db.database import Database
 from src.scheduler.jobs import register_jobs
 from src.scraper.amul_scraper import AmulScraper
-from src.scraper.cart_manager import CartManager
 
 logging.basicConfig(
     format="%(asctime)s | %(name)-28s | %(levelname)-7s | %(message)s",
@@ -31,11 +29,8 @@ async def post_init(app: Application) -> None:
     scraper = AmulScraper()
     await scraper.start()
 
-    cart_manager = CartManager(scraper._browser)
-
     app.bot_data["db"] = db
     app.bot_data["scraper"] = scraper
-    app.bot_data["cart_manager"] = cart_manager
 
     logger.info("Bot resources initialized")
 
@@ -72,7 +67,7 @@ def main() -> None:
 
     register_jobs(app)
 
-    logger.info("Starting Amul Protein Bot...")
+    logger.info("Starting Amul Protein Tracker...")
     app.run_polling(drop_pending_updates=True)
 
 

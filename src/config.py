@@ -172,14 +172,3 @@ PRODUCT_CATALOG: dict[str, Product] = {
     ]
 }
 
-DAYS_OF_WEEK = [
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday",
-]
-
-HOUR_SLOTS = [f"{h:02d}:00" for h in range(6, 23)]

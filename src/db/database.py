@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,7 +7,7 @@ from pathlib import Path
 import aiosqlite
 
 from src.config import DB_PATH
-from src.db.models import Order, ProductPrice, Schedule, User
+from src.db.models import ProductPrice, User
 
 logger = logging.getLogger(__name__)
 
@@ -28,18 +27,6 @@ CREATE TABLE IF NOT EXISTS product_prices (
     last_checked  TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS schedules (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id       INTEGER NOT NULL,
-    day_of_week   INTEGER NOT NULL,
-    hour          INTEGER NOT NULL DEFAULT 9,
-    minute        INTEGER NOT NULL DEFAULT 0,
-    products      TEXT NOT NULL DEFAULT '{}',
-    active        INTEGER DEFAULT 1,
-    created_at    TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(telegram_id)
-);
-
 CREATE TABLE IF NOT EXISTS watchlist (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id       INTEGER NOT NULL,
@@ -47,17 +34,6 @@ CREATE TABLE IF NOT EXISTS watchlist (
     created_at    TEXT NOT NULL,
     notified      INTEGER DEFAULT 0,
     UNIQUE(user_id, product_id),
-    FOREIGN KEY (user_id) REFERENCES users(telegram_id)
-);
-
-CREATE TABLE IF NOT EXISTS orders (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id         INTEGER NOT NULL,
-    products        TEXT NOT NULL DEFAULT '{}',
-    status          TEXT NOT NULL DEFAULT 'pending',
-    checkout_url    TEXT DEFAULT '',
-    total_estimate  REAL DEFAULT 0.0,
-    created_at      TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(telegram_id)
 );
 """
@@ -172,135 +148,9 @@ class Database:
             rows = await cursor.fetchall()
             return [ProductPrice.from_row(r) for r in rows]
 
-    # ── Schedules ──
-
-    async def create_schedule(
-        self,
-        user_id: int,
-        day_of_week: int,
-        hour: int,
-        minute: int,
-        products: dict[str, int],
-    ) -> Schedule:
-        async with aiosqlite.connect(self._path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                """INSERT INTO schedules (user_id, day_of_week, hour, minute, products, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (user_id, day_of_week, hour, minute, json.dumps(products), _now()),
-            )
-            await db.commit()
-            row_id = cursor.lastrowid
-            cur = await db.execute("SELECT * FROM schedules WHERE id = ?", (row_id,))
-            row = await cur.fetchone()
-            return Schedule.from_row(row)
-
-    async def get_user_schedules(self, user_id: int) -> list[Schedule]:
-        async with aiosqlite.connect(self._path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                "SELECT * FROM schedules WHERE user_id = ? ORDER BY day_of_week, hour",
-                (user_id,),
-            )
-            rows = await cursor.fetchall()
-            return [Schedule.from_row(r) for r in rows]
-
-    async def get_active_schedules_for_time(
-        self, day_of_week: int, hour: int, minute: int
-    ) -> list[Schedule]:
-        async with aiosqlite.connect(self._path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                """SELECT * FROM schedules
-                   WHERE day_of_week = ? AND hour = ? AND minute = ? AND active = 1""",
-                (day_of_week, hour, minute),
-            )
-            rows = await cursor.fetchall()
-            return [Schedule.from_row(r) for r in rows]
-
-    async def toggle_schedule(self, schedule_id: int, active: bool) -> None:
-        async with aiosqlite.connect(self._path) as db:
-            await db.execute(
-                "UPDATE schedules SET active = ? WHERE id = ?",
-                (int(active), schedule_id),
-            )
-            await db.commit()
-
-    async def delete_schedule(self, schedule_id: int) -> None:
-        async with aiosqlite.connect(self._path) as db:
-            await db.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
-            await db.commit()
-
-    # ── Orders ──
-
-    async def create_order(
-        self,
-        user_id: int,
-        products: dict[str, int],
-        status: str = "pending",
-        checkout_url: str = "",
-        total_estimate: float = 0.0,
-    ) -> Order:
-        async with aiosqlite.connect(self._path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                """INSERT INTO orders (user_id, products, status, checkout_url, total_estimate, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (
-                    user_id,
-                    json.dumps(products),
-                    status,
-                    checkout_url,
-                    total_estimate,
-                    _now(),
-                ),
-            )
-            await db.commit()
-            row_id = cursor.lastrowid
-            cur = await db.execute("SELECT * FROM orders WHERE id = ?", (row_id,))
-            row = await cur.fetchone()
-            return Order.from_row(row)
-
-    async def update_order_status(
-        self,
-        order_id: int,
-        status: str,
-        checkout_url: str = "",
-        total_estimate: float = 0.0,
-    ) -> None:
-        async with aiosqlite.connect(self._path) as db:
-            await db.execute(
-                """UPDATE orders SET status = ?, checkout_url = ?, total_estimate = ?
-                   WHERE id = ?""",
-                (status, checkout_url, total_estimate, order_id),
-            )
-            await db.commit()
-
-    async def get_user_orders(
-        self, user_id: int, limit: int = 10
-    ) -> list[Order]:
-        async with aiosqlite.connect(self._path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                "SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
-                (user_id, limit),
-            )
-            rows = await cursor.fetchall()
-            return [Order.from_row(r) for r in rows]
-
-    async def get_order(self, order_id: int) -> Order | None:
-        async with aiosqlite.connect(self._path) as db:
-            db.row_factory = aiosqlite.Row
-            cursor = await db.execute(
-                "SELECT * FROM orders WHERE id = ?", (order_id,)
-            )
-            row = await cursor.fetchone()
-            return Order.from_row(row) if row else None
-
     # ── Watchlist ──
 
     async def add_to_watchlist(self, user_id: int, product_id: str) -> bool:
-        """Add a product to the user's watchlist. Returns True if added, False if already exists."""
         async with aiosqlite.connect(self._path) as db:
             try:
                 await db.execute(
@@ -322,7 +172,6 @@ class Database:
             await db.commit()
 
     async def get_user_watchlist(self, user_id: int) -> list[str]:
-        """Return list of product_ids the user is watching."""
         async with aiosqlite.connect(self._path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
@@ -333,7 +182,6 @@ class Database:
             return [row["product_id"] for row in rows]
 
     async def get_watchers_for_product(self, product_id: str) -> list[int]:
-        """Return user_ids watching a specific product (not yet notified)."""
         async with aiosqlite.connect(self._path) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
