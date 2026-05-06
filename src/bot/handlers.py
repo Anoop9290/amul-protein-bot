@@ -131,10 +131,20 @@ async def order_start(
     context.user_data["selected_products"] = set()
     context.user_data["quantities"] = {}
 
+    db = _get_db(context)
+    prices_list = await db.get_all_product_prices()
+    stock_status = {pp.product_id: pp.in_stock for pp in prices_list}
+    context.user_data["stock_status"] = stock_status
+
+    oos_count = sum(1 for v in stock_status.values() if not v)
+    note = f"\n_({oos_count} products out of stock)_" if oos_count else ""
+
     await update.message.reply_text(
-        "*Select products to order:*\n\nTap to toggle, then press Confirm.",
+        f"*Select products to order:*\n\nTap to toggle, then press Confirm.{note}",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=keyboards.product_selection_keyboard(),
+        reply_markup=keyboards.product_selection_keyboard(
+            stock_status=stock_status,
+        ),
     )
     return SELECT_PRODUCTS
 
@@ -143,31 +153,51 @@ async def order_select_product(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> int:
     query = update.callback_query
-    await query.answer()
 
     data = query.data
     if not data or not data.startswith("sel_prod:"):
+        await query.answer()
         return SELECT_PRODUCTS
 
     action = data.split(":", 1)[1]
     selected: set[str] = context.user_data.get("selected_products", set())
+    stock_status: dict[str, bool] = context.user_data.get("stock_status", {})
+
+    # Out-of-stock item tapped
+    if action.startswith("oos:"):
+        pid = action.split(":", 1)[1]
+        product = PRODUCT_CATALOG.get(pid)
+        name = product.short_name if product else pid
+        await query.answer(
+            f"{name} is out of stock and cannot be ordered.\n"
+            f"Use /track to get notified when it's back!",
+            show_alert=True,
+        )
+        return SELECT_PRODUCTS
 
     if action == "cancel":
+        await query.answer()
         await query.edit_message_text("Order cancelled.")
         return ConversationHandler.END
 
     if action == "all":
-        if len(selected) == len(PRODUCT_CATALOG):
+        await query.answer()
+        in_stock_ids = {
+            pid for pid in PRODUCT_CATALOG
+            if stock_status.get(pid, True)
+        }
+        if selected >= in_stock_ids:
             selected.clear()
         else:
-            selected = set(PRODUCT_CATALOG.keys())
+            selected = in_stock_ids.copy()
         context.user_data["selected_products"] = selected
         await query.edit_message_reply_markup(
-            reply_markup=keyboards.product_selection_keyboard(selected)
+            reply_markup=keyboards.product_selection_keyboard(selected, stock_status)
         )
         return SELECT_PRODUCTS
 
     if action == "confirm":
+        await query.answer()
         if not selected:
             await query.answer("Please select at least one product!", show_alert=True)
             return SELECT_PRODUCTS
@@ -178,8 +208,15 @@ async def order_select_product(
 
         return await _show_quantity_step(query, context)
 
-    # Toggle individual product
+    # Toggle individual product (only if in stock)
     if action in PRODUCT_CATALOG:
+        await query.answer()
+        if not stock_status.get(action, True):
+            await query.answer(
+                "This product is out of stock!",
+                show_alert=True,
+            )
+            return SELECT_PRODUCTS
         if action in selected:
             selected.discard(action)
         else:
@@ -187,7 +224,7 @@ async def order_select_product(
         context.user_data["selected_products"] = selected
 
     await query.edit_message_reply_markup(
-        reply_markup=keyboards.product_selection_keyboard(selected)
+        reply_markup=keyboards.product_selection_keyboard(selected, stock_status)
     )
     return SELECT_PRODUCTS
 

@@ -8,24 +8,39 @@ from src.db.models import Schedule
 
 def product_selection_keyboard(
     selected: set[str] | None = None,
+    stock_status: dict[str, bool] | None = None,
 ) -> InlineKeyboardMarkup:
-    """Grid of product toggles with a confirm/cancel row."""
+    """Grid of product toggles with a confirm/cancel row.
+    Out-of-stock items are shown but marked and not selectable.
+    """
     selected = selected or set()
+    stock = stock_status or {}
     rows: list[list[InlineKeyboardButton]] = []
 
     for pid, product in PRODUCT_CATALOG.items():
-        check = "  [x]" if pid in selected else ""
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    f"{product.short_name}{check}",
-                    callback_data=f"sel_prod:{pid}",
-                )
-            ]
-        )
+        in_stock = stock.get(pid, True)  # assume in-stock if unknown
+        if not in_stock:
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"[X] {product.short_name} (Out of Stock)",
+                        callback_data=f"sel_prod:oos:{pid}",
+                    )
+                ]
+            )
+        else:
+            check = "  [x]" if pid in selected else ""
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"{product.short_name}{check}",
+                        callback_data=f"sel_prod:{pid}",
+                    )
+                ]
+            )
 
     action_row = [
-        InlineKeyboardButton("Select All", callback_data="sel_prod:all"),
+        InlineKeyboardButton("Select All (In Stock)", callback_data="sel_prod:all"),
         InlineKeyboardButton("Confirm", callback_data="sel_prod:confirm"),
     ]
     rows.append(action_row)
